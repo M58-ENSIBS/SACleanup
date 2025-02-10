@@ -1,0 +1,49 @@
+variables:
+  KUBERNETES_MEMORY_REQUEST: "4Gi"
+  KUBERNETES_MEMORY_LIMIT: "8Gi"
+  KUBERNETES_CPU_REQUEST: "2000m"
+  KUBERNETES_CPU_LIMIT: "2000m"
+
+stages: [setup, security]  # Added 'secret_detection' stage
+
+.setup: &setup-config
+  cache:
+    key: 
+      files: [requirements.txt]
+    paths: [.cache/pip]
+    policy: pull-push
+
+.security: &security-config
+  stage: security
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" || $CI_COMMIT_BRANCH == "main"'
+  retry: { max: 2, when: runner_system_failure }
+
+setup-job:
+  <<: *setup-config
+  stage: setup
+  image: python:3.9-slim
+  script:
+    - pip install --no-cache-dir -r requirements.txt
+
+security-secrets-scan:
+  <<: *security-config
+  script:
+    - echo "Using gcloud from the toolbox image..."
+    - gcloud --version
+
+    - echo "Installing Python and pip..."
+    - apk add --no-cache python3 py3-pip
+
+    - echo "Installing Python dependencies..."
+    - pip3 install --user -r requirements.txt
+
+    - echo "Running Python script..."
+    - cd scripts && python3 slack.py
+
+  artifacts:
+    paths: [scripts/output_with_status.csv]
+    untracked: false
+    expire_in: never
+    name: "${CI_JOB_STARTED_AT}_${SCAN_TYPE}_service_account_cron_scan"
